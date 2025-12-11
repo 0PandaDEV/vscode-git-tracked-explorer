@@ -30,8 +30,9 @@ export class GitTrackedProvider implements vscode.TreeDataProvider<TreeNode> {
                 return this.getGitTrackedFiles(this.workspaceFolders[0].uri.fsPath);
             }
 
-            // Multi-root: show workspace folders
-            return this.workspaceFolders.map(folder => new WorkspaceFolderItem(folder));
+            // Multi-root: show only workspace folders with git repositories
+            const gitFolders = await this.filterGitFolders(this.workspaceFolders);
+            return gitFolders.map(folder => new WorkspaceFolderItem(folder));
         }
 
         if (element instanceof WorkspaceFolderItem) {
@@ -47,12 +48,33 @@ export class GitTrackedProvider implements vscode.TreeDataProvider<TreeNode> {
         return [];
     }
 
+    private async filterGitFolders(folders: readonly vscode.WorkspaceFolder[]): Promise<vscode.WorkspaceFolder[]> {
+        const checks = await Promise.all(
+            folders.map(folder => this.hasGitRepository(folder.uri.fsPath))
+        );
+
+        return folders.filter((_, index) => checks[index]);
+    }
+
+    private async hasGitRepository(workspaceRoot: string): Promise<boolean> {
+        return new Promise((resolve) => {
+            const checkGit = '[ -e .git ]';
+
+            cp.exec(checkGit, { cwd: workspaceRoot }, (error) => {
+                resolve(!error);
+            });
+        });
+    }
+
     private async getGitTrackedFiles(workspaceRoot: string): Promise<FileItem[]> {
         return new Promise((resolve) => {
-            cp.exec('git ls-files', { cwd: workspaceRoot }, (error, stdout, stderr) => {
+            // Only process if .git exists in current directory (don't traverse up)
+            const checkAndList = '[ -e .git ] && git ls-files';
+
+            cp.exec(checkAndList, { cwd: workspaceRoot }, (error, stdout, stderr) => {
                 if (error) {
-                    console.error('Error executing git ls-files:', error);
-                    vscode.window.showErrorMessage('Failed to get git tracked files. Make sure this is a git repository.');
+                    // No .git in this directory, return empty
+                    console.log('No git repository in:', workspaceRoot);
                     resolve([]);
                     return;
                 }
@@ -123,7 +145,10 @@ export class GitTrackedProvider implements vscode.TreeDataProvider<TreeNode> {
 
     private async getFilesInDirectory(dirPath: string, workspaceRoot: string): Promise<FileItem[]> {
         return new Promise((resolve) => {
-            cp.exec('git ls-files', { cwd: workspaceRoot }, (error, stdout, stderr) => {
+            // Only process if .git exists in current directory (don't traverse up)
+            const checkAndList = '[ -e .git ] && git ls-files';
+
+            cp.exec(checkAndList, { cwd: workspaceRoot }, (error, stdout, stderr) => {
                 if (error) {
                     resolve([]);
                     return;

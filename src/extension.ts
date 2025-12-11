@@ -33,10 +33,14 @@ function setupGitIndexWatcher(
     provider: GitTrackedProvider,
     context: vscode.ExtensionContext
 ) {
-    // Use git rev-parse to find actual git directory (handles --separate-git-dir)
-    cp.exec('git rev-parse --git-dir', { cwd: rootPath }, (error, stdout, stderr) => {
+    // Only process if .git exists in current directory (don't traverse up)
+    // Note: .git can be a file (--separate-git-dir) or directory
+    const checkAndGetGitDir = '[ -e .git ] && git rev-parse --git-dir';
+
+    cp.exec(checkAndGetGitDir, { cwd: rootPath }, (error, stdout, stderr) => {
         if (error) {
-            console.error('Failed to find git directory:', error);
+            // No .git in this directory, skip
+            console.log('No git repository in:', rootPath);
             return;
         }
 

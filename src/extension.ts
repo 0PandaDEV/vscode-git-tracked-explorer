@@ -23,11 +23,13 @@ export function activate(context: vscode.ExtensionContext) {
     );
 
     // Track watchers for each workspace folder
-    const watchers = new Map<string, vscode.FileSystemWatcher>();
+    const gitIndexWatchers = new Map<string, vscode.FileSystemWatcher>();
+    const gitDirWatchers = new Map<string, vscode.FileSystemWatcher>();
 
-    // Setup initial watchers
+    // Setup initial watchers for each workspace folder
     workspaceFolders.forEach(folder => {
-        setupGitIndexWatcher(folder.uri.fsPath, gitTrackedProvider, context, watchers);
+        setupGitIndexWatcher(folder.uri.fsPath, gitTrackedProvider, context, gitIndexWatchers);
+        setupGitDirWatcher(folder.uri.fsPath, gitTrackedProvider, context, gitIndexWatchers, gitDirWatchers);
     });
 
     // Watch for workspace folder changes (add/remove folders)
@@ -38,17 +40,25 @@ export function activate(context: vscode.ExtensionContext) {
 
             // Setup watchers for added folders
             event.added.forEach(folder => {
-                setupGitIndexWatcher(folder.uri.fsPath, gitTrackedProvider, context, watchers);
+                setupGitIndexWatcher(folder.uri.fsPath, gitTrackedProvider, context, gitIndexWatchers);
+                setupGitDirWatcher(folder.uri.fsPath, gitTrackedProvider, context, gitIndexWatchers, gitDirWatchers);
             });
 
             // Dispose watchers for removed folders
             event.removed.forEach(folder => {
-                const watcher = watchers.get(folder.uri.fsPath);
-                if (watcher) {
-                    watcher.dispose();
-                    watchers.delete(folder.uri.fsPath);
-                    console.log('Stopped watching:', folder.uri.fsPath);
+                const indexWatcher = gitIndexWatchers.get(folder.uri.fsPath);
+                if (indexWatcher) {
+                    indexWatcher.dispose();
+                    gitIndexWatchers.delete(folder.uri.fsPath);
                 }
+
+                const dirWatcher = gitDirWatchers.get(folder.uri.fsPath);
+                if (dirWatcher) {
+                    dirWatcher.dispose();
+                    gitDirWatchers.delete(folder.uri.fsPath);
+                }
+
+                console.log('Stopped watching:', folder.uri.fsPath);
             });
         })
     );
@@ -93,6 +103,39 @@ function setupGitIndexWatcher(
 
         console.log('Watching git index at:', indexPath);
     });
+}
+
+function setupGitDirWatcher(
+    rootPath: string,
+    provider: GitTrackedProvider,
+    context: vscode.ExtensionContext,
+    gitIndexWatchers: Map<string, vscode.FileSystemWatcher>,
+    gitDirWatchers: Map<string, vscode.FileSystemWatcher>
+) {
+    // Watch for .git creation/deletion in this workspace folder
+    const pattern = new vscode.RelativePattern(rootPath, '.git');
+    const watcher = vscode.workspace.createFileSystemWatcher(pattern);
+
+    watcher.onDidCreate(() => {
+        console.log('.git created in:', rootPath);
+        // Setup git index watcher for newly initialized repository
+        setupGitIndexWatcher(rootPath, provider, context, gitIndexWatchers);
+        provider.refresh();
+    });
+
+    watcher.onDidDelete(() => {
+        console.log('.git deleted in:', rootPath);
+        // Remove git index watcher for deleted repository
+        const indexWatcher = gitIndexWatchers.get(rootPath);
+        if (indexWatcher) {
+            indexWatcher.dispose();
+            gitIndexWatchers.delete(rootPath);
+        }
+        provider.refresh();
+    });
+
+    context.subscriptions.push(watcher);
+    gitDirWatchers.set(rootPath, watcher);
 }
 
 export function deactivate() {}

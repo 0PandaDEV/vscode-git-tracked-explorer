@@ -1,4 +1,6 @@
 import * as vscode from 'vscode';
+import * as cp from 'child_process';
+import * as path from 'path';
 import { GitTrackedProvider } from './gitTrackedProvider';
 
 export function activate(context: vscode.ExtensionContext) {
@@ -22,12 +24,45 @@ export function activate(context: vscode.ExtensionContext) {
         })
     );
 
-    // Watch git index file only (changes when git add/commit/reset happens)
+    // Watch git index file (supports --separate-git-dir)
     if (rootPath) {
-        const gitIndexWatcher = vscode.workspace.createFileSystemWatcher('**/.git/index');
-        gitIndexWatcher.onDidChange(() => gitTrackedProvider.refresh());
-        context.subscriptions.push(gitIndexWatcher);
+        setupGitIndexWatcher(rootPath, gitTrackedProvider, context);
     }
+}
+
+function setupGitIndexWatcher(
+    rootPath: string,
+    provider: GitTrackedProvider,
+    context: vscode.ExtensionContext
+) {
+    // Use git rev-parse to find actual git directory (handles --separate-git-dir)
+    cp.exec('git rev-parse --git-dir', { cwd: rootPath }, (error, stdout, stderr) => {
+        if (error) {
+            console.error('Failed to find git directory:', error);
+            return;
+        }
+
+        let gitDir = stdout.trim();
+
+        // If relative path, resolve it relative to rootPath
+        if (!path.isAbsolute(gitDir)) {
+            gitDir = path.resolve(rootPath, gitDir);
+        }
+
+        const indexPath = path.join(gitDir, 'index');
+
+        // Watch the specific index file
+        const pattern = new vscode.RelativePattern(gitDir, 'index');
+        const watcher = vscode.workspace.createFileSystemWatcher(pattern);
+
+        watcher.onDidChange(() => provider.refresh());
+        watcher.onDidCreate(() => provider.refresh());
+        watcher.onDidDelete(() => provider.refresh());
+
+        context.subscriptions.push(watcher);
+
+        console.log('Watching git index at:', indexPath);
+    });
 }
 
 export function deactivate() {}

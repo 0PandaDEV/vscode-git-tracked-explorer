@@ -1,11 +1,15 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
-import * as cp from 'child_process';
 import * as fs from 'fs';
+import { GitCommand } from './gitCommand';
 
+/**
+ * Tree data provider for git tracked files.
+ * Follows: "If the implementation is easy to explain, it may be a good idea"
+ */
 export class GitTrackedProvider implements vscode.TreeDataProvider<TreeNode> {
-    private _onDidChangeTreeData: vscode.EventEmitter<TreeNode | undefined | null | void> = new vscode.EventEmitter<TreeNode | undefined | null | void>();
-    readonly onDidChangeTreeData: vscode.Event<TreeNode | undefined | null | void> = this._onDidChangeTreeData.event;
+    private _onDidChangeTreeData = new vscode.EventEmitter<TreeNode | undefined | null | void>();
+    readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
 
     constructor(private workspaceFolders: readonly vscode.WorkspaceFolder[]) {}
 
@@ -24,188 +28,204 @@ export class GitTrackedProvider implements vscode.TreeDataProvider<TreeNode> {
 
     async getChildren(element?: TreeNode): Promise<TreeNode[]> {
         if (!element) {
-            // Root level: return workspace folders
-            if (this.workspaceFolders.length === 0) {
-                vscode.window.showInformationMessage('No workspace folder open');
-                return [];
-            }
-
-            // Single workspace: show files directly
-            if (this.workspaceFolders.length === 1) {
-                return this.getGitTrackedFiles(this.workspaceFolders[0].uri.fsPath);
-            }
-
-            // Multi-root: show only workspace folders with git repositories
-            const gitFolders = await this.filterGitFolders(this.workspaceFolders);
-            return gitFolders.map(folder => new WorkspaceFolderItem(folder));
+            return this.getRootChildren();
         }
 
         if (element instanceof WorkspaceFolderItem) {
-            // Return git tracked files for this workspace folder
-            return this.getGitTrackedFiles(element.workspaceFolder.uri.fsPath);
+            return this.getWorkspaceFolderChildren(element);
         }
 
         if (element instanceof FileItem) {
-            // Return children of a directory
-            return this.getFilesInDirectory(element.resourceUri.fsPath, element.workspaceRoot);
+            return this.getDirectoryChildren(element);
         }
 
         return [];
     }
 
-    private async filterGitFolders(folders: readonly vscode.WorkspaceFolder[]): Promise<vscode.WorkspaceFolder[]> {
+    /**
+     * Get root level children (workspace folders or files).
+     * Follows: "Flat is better than nested"
+     */
+    private async getRootChildren(): Promise<TreeNode[]> {
+        if (this.workspaceFolders.length === 0) {
+            vscode.window.showInformationMessage('No workspace folder open');
+            return [];
+        }
+
+        // Single workspace: show files directly
+        if (this.workspaceFolders.length === 1) {
+            return this.getTrackedFiles(this.workspaceFolders[0].uri.fsPath);
+        }
+
+        // Multi-root: show only workspace folders with git repositories
+        const gitFolders = await this.filterGitFolders();
+        return gitFolders.map(folder => new WorkspaceFolderItem(folder));
+    }
+
+    /**
+     * Get tracked files for a workspace folder.
+     */
+    private async getWorkspaceFolderChildren(item: WorkspaceFolderItem): Promise<TreeNode[]> {
+        return this.getTrackedFiles(item.workspaceFolder.uri.fsPath);
+    }
+
+    /**
+     * Get children for a directory.
+     */
+    private async getDirectoryChildren(item: FileItem): Promise<TreeNode[]> {
+        return this.getDirectoryFiles(item.resourceUri.fsPath, item.workspaceRoot);
+    }
+
+    /**
+     * Filter workspace folders that have git repositories.
+     * Follows: "There should be one obvious way to do it"
+     */
+    private async filterGitFolders(): Promise<vscode.WorkspaceFolder[]> {
         const checks = await Promise.all(
-            folders.map(folder => this.hasGitRepository(folder.uri.fsPath))
+            this.workspaceFolders.map(folder =>
+                GitCommand.hasGitRepo(folder.uri.fsPath)
+            )
         );
-
-        return folders.filter((_, index) => checks[index]);
+        return this.workspaceFolders.filter((_, index) => checks[index]);
     }
 
-    private async hasGitRepository(workspaceRoot: string): Promise<boolean> {
-        return new Promise((resolve) => {
-            const checkGit = '[ -e .git ]';
-
-            cp.exec(checkGit, { cwd: workspaceRoot }, (error) => {
-                resolve(!error);
-            });
-        });
+    /**
+     * Get git tracked files as tree structure.
+     * Follows: "Simple is better than complex"
+     */
+    private async getTrackedFiles(workspaceRoot: string): Promise<FileItem[]> {
+        const files = await GitCommand.listTrackedFiles(workspaceRoot);
+        if (files.length === 0) {
+            return [];
+        }
+        return this.buildFileTree(files, workspaceRoot);
     }
 
-    private async getGitTrackedFiles(workspaceRoot: string): Promise<FileItem[]> {
-        return new Promise((resolve) => {
-            // Only process if .git exists in current directory (don't traverse up)
-            const checkAndList = '[ -e .git ] && git ls-files';
-
-            cp.exec(checkAndList, { cwd: workspaceRoot }, (error, stdout, stderr) => {
-                if (error) {
-                    // No .git in this directory, return empty
-                    console.log('No git repository in:', workspaceRoot);
-                    resolve([]);
-                    return;
-                }
-
-                const files = stdout
-                    .split('\n')
-                    .filter(file => file.trim() !== '')
-                    .map(file => file.trim());
-
-                const tree = this.buildFileTree(files, workspaceRoot);
-                resolve(tree);
-            });
-        });
-    }
-
+    /**
+     * Build tree structure from flat file list.
+     */
     private buildFileTree(files: string[], workspaceRoot: string): FileItem[] {
-        const root: { [key: string]: any } = {};
+        const tree = this.createTreeStructure(files);
+        return this.convertTreeToItems(tree, workspaceRoot);
+    }
 
-        // Build tree structure
+    /**
+     * Create nested tree structure from file paths.
+     * Follows: "Readability counts"
+     */
+    private createTreeStructure(files: string[]): TreeStructure {
+        const root: TreeStructure = {};
+
         files.forEach(file => {
             const parts = file.split('/');
             let current = root;
 
             parts.forEach((part, index) => {
+                const isFile = index === parts.length - 1;
                 if (!current[part]) {
-                    current[part] = index === parts.length - 1 ? null : {};
+                    current[part] = isFile ? null : {};
                 }
-                if (current[part] !== null) {
-                    current = current[part];
+                if (!isFile) {
+                    current = current[part] as TreeStructure;
                 }
             });
         });
 
-        // Convert tree structure to FileItem array
-        return this.convertToFileItems(root, workspaceRoot);
+        return root;
     }
 
-    private convertToFileItems(node: any, basePath: string): FileItem[] {
-        const items: FileItem[] = [];
+    /**
+     * Convert tree structure to FileItem array.
+     */
+    private convertTreeToItems(tree: TreeStructure, basePath: string): FileItem[] {
+        return Object.keys(tree)
+            .sort()
+            .map(key => this.createFileItem(key, tree[key], basePath));
+    }
 
-        Object.keys(node).sort().forEach(key => {
-            const fullPath = path.join(basePath, key);
-            const isDirectory = node[key] !== null;
+    /**
+     * Create FileItem from tree node.
+     * Follows: "Explicit is better than implicit"
+     */
+    private createFileItem(name: string, node: TreeStructure | null, basePath: string): FileItem {
+        const fullPath = path.join(basePath, name);
+        const isDirectory = node !== null;
+        const collapsibleState = isDirectory
+            ? vscode.TreeItemCollapsibleState.Collapsed
+            : vscode.TreeItemCollapsibleState.None;
 
-            if (isDirectory) {
-                // Directory
-                items.push(new FileItem(
-                    key,
-                    vscode.Uri.file(fullPath),
-                    vscode.TreeItemCollapsibleState.Collapsed,
-                    true,
-                    basePath
-                ));
-            } else {
-                // File
-                items.push(new FileItem(
-                    key,
-                    vscode.Uri.file(fullPath),
-                    vscode.TreeItemCollapsibleState.None,
-                    false,
-                    basePath
-                ));
+        return new FileItem(name, vscode.Uri.file(fullPath), collapsibleState, isDirectory, basePath);
+    }
+
+    /**
+     * Get files in a directory.
+     */
+    private async getDirectoryFiles(dirPath: string, workspaceRoot: string): Promise<FileItem[]> {
+        const allFiles = await GitCommand.listTrackedFiles(workspaceRoot);
+        if (allFiles.length === 0) {
+            return [];
+        }
+
+        const relativeDirPath = path.relative(workspaceRoot, dirPath);
+        const directChildren = this.extractDirectChildren(allFiles, relativeDirPath);
+
+        return Array.from(directChildren)
+            .sort()
+            .map(name => this.createDirectoryItem(name, dirPath, workspaceRoot));
+    }
+
+    /**
+     * Extract direct children from file list.
+     * Follows: "Simple is better than complex"
+     */
+    private extractDirectChildren(files: string[], relativeDirPath: string): Set<string> {
+        const prefix = relativeDirPath ? relativeDirPath + '/' : '';
+        const children = new Set<string>();
+
+        files.forEach(file => {
+            if (file.startsWith(prefix)) {
+                const remainder = file.substring(prefix.length);
+                if (remainder.length > 0) {
+                    const firstPart = remainder.split('/')[0];
+                    children.add(firstPart);
+                }
             }
         });
 
-        return items;
+        return children;
     }
 
-    private async getFilesInDirectory(dirPath: string, workspaceRoot: string): Promise<FileItem[]> {
-        return new Promise((resolve) => {
-            // Only process if .git exists in current directory (don't traverse up)
-            const checkAndList = '[ -e .git ] && git ls-files';
+    /**
+     * Create FileItem for directory child.
+     */
+    private createDirectoryItem(name: string, dirPath: string, workspaceRoot: string): FileItem {
+        const fullPath = path.join(dirPath, name);
+        const isDirectory = fs.existsSync(fullPath) && fs.statSync(fullPath).isDirectory();
+        const collapsibleState = isDirectory
+            ? vscode.TreeItemCollapsibleState.Collapsed
+            : vscode.TreeItemCollapsibleState.None;
 
-            cp.exec(checkAndList, { cwd: workspaceRoot }, (error, stdout, stderr) => {
-                if (error) {
-                    resolve([]);
-                    return;
-                }
-
-                const relativeDirPath = path.relative(workspaceRoot, dirPath);
-                const allFiles = stdout
-                    .split('\n')
-                    .filter(file => file.trim() !== '')
-                    .map(file => file.trim());
-
-                // Filter files that are direct children of this directory
-                const prefix = relativeDirPath ? relativeDirPath + '/' : '';
-                const childrenFiles = allFiles
-                    .filter(file => file.startsWith(prefix))
-                    .map(file => file.substring(prefix.length))
-                    .filter(file => file.length > 0);
-
-                // Group into direct children only
-                const directChildren = new Set<string>();
-                childrenFiles.forEach(file => {
-                    const firstPart = file.split('/')[0];
-                    directChildren.add(firstPart);
-                });
-
-                const items: FileItem[] = [];
-                Array.from(directChildren).sort().forEach(name => {
-                    const fullPath = path.join(dirPath, name);
-                    const isDirectory = fs.existsSync(fullPath) && fs.statSync(fullPath).isDirectory();
-
-                    items.push(new FileItem(
-                        name,
-                        vscode.Uri.file(fullPath),
-                        isDirectory ? vscode.TreeItemCollapsibleState.Collapsed : vscode.TreeItemCollapsibleState.None,
-                        isDirectory,
-                        workspaceRoot
-                    ));
-                });
-
-                resolve(items);
-            });
-        });
+        return new FileItem(name, vscode.Uri.file(fullPath), collapsibleState, isDirectory, workspaceRoot);
     }
 }
 
-// Union type for all tree node types
+/**
+ * Tree structure type.
+ * null = file, object = directory
+ */
+type TreeStructure = { [key: string]: TreeStructure | null };
+
+/**
+ * Union type for all tree nodes.
+ */
 type TreeNode = WorkspaceFolderItem | FileItem;
 
+/**
+ * Tree item for workspace folder.
+ */
 class WorkspaceFolderItem extends vscode.TreeItem {
     constructor(public readonly workspaceFolder: vscode.WorkspaceFolder) {
         super(workspaceFolder.name, vscode.TreeItemCollapsibleState.Collapsed);
-
         this.tooltip = workspaceFolder.uri.fsPath;
         this.contextValue = 'workspaceFolder';
         this.iconPath = vscode.ThemeIcon.Folder;
@@ -213,18 +233,22 @@ class WorkspaceFolderItem extends vscode.TreeItem {
     }
 }
 
+/**
+ * Tree item for file or directory.
+ */
 class FileItem extends vscode.TreeItem {
     constructor(
-        public readonly label: string,
+        label: string,
         public readonly resourceUri: vscode.Uri,
-        public readonly collapsibleState: vscode.TreeItemCollapsibleState,
+        collapsibleState: vscode.TreeItemCollapsibleState,
         public readonly isDirectory: boolean,
         public readonly workspaceRoot: string
     ) {
         super(label, collapsibleState);
-
         this.resourceUri = resourceUri;
         this.tooltip = resourceUri.fsPath;
+        this.contextValue = isDirectory ? 'directory' : 'file';
+        this.iconPath = isDirectory ? vscode.ThemeIcon.Folder : vscode.ThemeIcon.File;
 
         if (!isDirectory) {
             this.command = {
@@ -232,16 +256,6 @@ class FileItem extends vscode.TreeItem {
                 title: 'Open File',
                 arguments: [resourceUri]
             };
-            this.contextValue = 'file';
-        } else {
-            this.contextValue = 'directory';
-        }
-
-        // Set icon
-        if (isDirectory) {
-            this.iconPath = vscode.ThemeIcon.Folder;
-        } else {
-            this.iconPath = vscode.ThemeIcon.File;
         }
     }
 }

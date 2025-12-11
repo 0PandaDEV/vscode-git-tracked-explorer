@@ -1,0 +1,61 @@
+{
+  "name": "git-tracked-explorer",
+  "displayName": "Git Tracked Explorer",
+  "description": "Show only git-tracked files in VS Code explorer",
+  "version": "0.0.1",
+  "engines": {
+    "vscode": "^1.75.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "views": {
+      "explorer": [
+        {
+          "id": "gitTrackedExplorer",
+          "name": "Git Tracked Files"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "gitTrackedExplorer.refresh",
+        "title": "Refresh Git Tracked Files",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "gitTrackedExplorer.openFile",
+        "title": "Open File"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "gitTrackedExplorer.refresh",
+          "when": "view == gitTrackedExplorer",
+          "group": "navigation"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "pretest": "npm run compile && npm run lint",
+    "lint": "eslint src --ext ts"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.75.0",
+    "@types/node": "16.x",
+    "@typescript-eslint/eslint-plugin": "^5.45.0",
+    "@typescript-eslint/parser": "^5.45.0",
+    "eslint": "^8.28.0",
+    "typescript": "^4.9.3"
+  }
+}

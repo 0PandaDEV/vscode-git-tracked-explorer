@@ -13,6 +13,11 @@ export class GitTrackedProvider implements vscode.TreeDataProvider<TreeNode> {
         this._onDidChangeTreeData.fire();
     }
 
+    updateWorkspaceFolders(folders: readonly vscode.WorkspaceFolder[]): void {
+        this.workspaceFolders = folders;
+        this.refresh();
+    }
+
     getTreeItem(element: TreeNode): vscode.TreeItem {
         return element;
     }

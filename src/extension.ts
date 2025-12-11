@@ -22,12 +22,12 @@ export function activate(context: vscode.ExtensionContext) {
         })
     );
 
-    // Watch for git changes
-    const watcher = vscode.workspace.createFileSystemWatcher('**/*');
-    watcher.onDidCreate(() => gitTrackedProvider.refresh());
-    watcher.onDidDelete(() => gitTrackedProvider.refresh());
-    watcher.onDidChange(() => gitTrackedProvider.refresh());
-    context.subscriptions.push(watcher);
+    // Watch git index file only (changes when git add/commit/reset happens)
+    if (rootPath) {
+        const gitIndexWatcher = vscode.workspace.createFileSystemWatcher('**/.git/index');
+        gitIndexWatcher.onDidChange(() => gitTrackedProvider.refresh());
+        context.subscriptions.push(gitIndexWatcher);
+    }
 }
 
 export function deactivate() {}

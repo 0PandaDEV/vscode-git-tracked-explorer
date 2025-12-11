@@ -3,42 +3,53 @@ import * as path from 'path';
 import * as cp from 'child_process';
 import * as fs from 'fs';
 
-export class GitTrackedProvider implements vscode.TreeDataProvider<FileItem> {
-    private _onDidChangeTreeData: vscode.EventEmitter<FileItem | undefined | null | void> = new vscode.EventEmitter<FileItem | undefined | null | void>();
-    readonly onDidChangeTreeData: vscode.Event<FileItem | undefined | null | void> = this._onDidChangeTreeData.event;
+export class GitTrackedProvider implements vscode.TreeDataProvider<TreeNode> {
+    private _onDidChangeTreeData: vscode.EventEmitter<TreeNode | undefined | null | void> = new vscode.EventEmitter<TreeNode | undefined | null | void>();
+    readonly onDidChangeTreeData: vscode.Event<TreeNode | undefined | null | void> = this._onDidChangeTreeData.event;
 
-    constructor(private workspaceRoot: string | undefined) {}
+    constructor(private workspaceFolders: readonly vscode.WorkspaceFolder[]) {}
 
     refresh(): void {
         this._onDidChangeTreeData.fire();
     }
 
-    getTreeItem(element: FileItem): vscode.TreeItem {
+    getTreeItem(element: TreeNode): vscode.TreeItem {
         return element;
     }
 
-    async getChildren(element?: FileItem): Promise<FileItem[]> {
-        if (!this.workspaceRoot) {
-            vscode.window.showInformationMessage('No workspace folder open');
-            return [];
+    async getChildren(element?: TreeNode): Promise<TreeNode[]> {
+        if (!element) {
+            // Root level: return workspace folders
+            if (this.workspaceFolders.length === 0) {
+                vscode.window.showInformationMessage('No workspace folder open');
+                return [];
+            }
+
+            // Single workspace: show files directly
+            if (this.workspaceFolders.length === 1) {
+                return this.getGitTrackedFiles(this.workspaceFolders[0].uri.fsPath);
+            }
+
+            // Multi-root: show workspace folders
+            return this.workspaceFolders.map(folder => new WorkspaceFolderItem(folder));
         }
 
-        if (element) {
-            // Return children of a directory
-            return this.getFilesInDirectory(element.resourceUri.fsPath);
-        } else {
-            // Return root level git tracked files
-            return this.getGitTrackedFiles();
+        if (element instanceof WorkspaceFolderItem) {
+            // Return git tracked files for this workspace folder
+            return this.getGitTrackedFiles(element.workspaceFolder.uri.fsPath);
         }
+
+        if (element instanceof FileItem) {
+            // Return children of a directory
+            return this.getFilesInDirectory(element.resourceUri.fsPath, element.workspaceRoot);
+        }
+
+        return [];
     }
 
-    private async getGitTrackedFiles(): Promise<FileItem[]> {
-        if (!this.workspaceRoot) {
-            return [];
-        }
-
+    private async getGitTrackedFiles(workspaceRoot: string): Promise<FileItem[]> {
         return new Promise((resolve) => {
-            cp.exec('git ls-files', { cwd: this.workspaceRoot }, (error, stdout, stderr) => {
+            cp.exec('git ls-files', { cwd: workspaceRoot }, (error, stdout, stderr) => {
                 if (error) {
                     console.error('Error executing git ls-files:', error);
                     vscode.window.showErrorMessage('Failed to get git tracked files. Make sure this is a git repository.');
@@ -51,13 +62,13 @@ export class GitTrackedProvider implements vscode.TreeDataProvider<FileItem> {
                     .filter(file => file.trim() !== '')
                     .map(file => file.trim());
 
-                const tree = this.buildFileTree(files);
+                const tree = this.buildFileTree(files, workspaceRoot);
                 resolve(tree);
             });
         });
     }
 
-    private buildFileTree(files: string[]): FileItem[] {
+    private buildFileTree(files: string[], workspaceRoot: string): FileItem[] {
         const root: { [key: string]: any } = {};
 
         // Build tree structure
@@ -76,7 +87,7 @@ export class GitTrackedProvider implements vscode.TreeDataProvider<FileItem> {
         });
 
         // Convert tree structure to FileItem array
-        return this.convertToFileItems(root, this.workspaceRoot!);
+        return this.convertToFileItems(root, workspaceRoot);
     }
 
     private convertToFileItems(node: any, basePath: string): FileItem[] {
@@ -92,7 +103,8 @@ export class GitTrackedProvider implements vscode.TreeDataProvider<FileItem> {
                     key,
                     vscode.Uri.file(fullPath),
                     vscode.TreeItemCollapsibleState.Collapsed,
-                    true
+                    true,
+                    basePath
                 ));
             } else {
                 // File
@@ -100,7 +112,8 @@ export class GitTrackedProvider implements vscode.TreeDataProvider<FileItem> {
                     key,
                     vscode.Uri.file(fullPath),
                     vscode.TreeItemCollapsibleState.None,
-                    false
+                    false,
+                    basePath
                 ));
             }
         });
@@ -108,19 +121,15 @@ export class GitTrackedProvider implements vscode.TreeDataProvider<FileItem> {
         return items;
     }
 
-    private async getFilesInDirectory(dirPath: string): Promise<FileItem[]> {
-        if (!this.workspaceRoot) {
-            return [];
-        }
-
+    private async getFilesInDirectory(dirPath: string, workspaceRoot: string): Promise<FileItem[]> {
         return new Promise((resolve) => {
-            cp.exec('git ls-files', { cwd: this.workspaceRoot }, (error, stdout, stderr) => {
+            cp.exec('git ls-files', { cwd: workspaceRoot }, (error, stdout, stderr) => {
                 if (error) {
                     resolve([]);
                     return;
                 }
 
-                const relativeDirPath = path.relative(this.workspaceRoot!, dirPath);
+                const relativeDirPath = path.relative(workspaceRoot, dirPath);
                 const allFiles = stdout
                     .split('\n')
                     .filter(file => file.trim() !== '')
@@ -149,7 +158,8 @@ export class GitTrackedProvider implements vscode.TreeDataProvider<FileItem> {
                         name,
                         vscode.Uri.file(fullPath),
                         isDirectory ? vscode.TreeItemCollapsibleState.Collapsed : vscode.TreeItemCollapsibleState.None,
-                        isDirectory
+                        isDirectory,
+                        workspaceRoot
                     ));
                 });
 
@@ -159,12 +169,27 @@ export class GitTrackedProvider implements vscode.TreeDataProvider<FileItem> {
     }
 }
 
+// Union type for all tree node types
+type TreeNode = WorkspaceFolderItem | FileItem;
+
+class WorkspaceFolderItem extends vscode.TreeItem {
+    constructor(public readonly workspaceFolder: vscode.WorkspaceFolder) {
+        super(workspaceFolder.name, vscode.TreeItemCollapsibleState.Collapsed);
+
+        this.tooltip = workspaceFolder.uri.fsPath;
+        this.contextValue = 'workspaceFolder';
+        this.iconPath = vscode.ThemeIcon.Folder;
+        this.description = workspaceFolder.uri.fsPath;
+    }
+}
+
 class FileItem extends vscode.TreeItem {
     constructor(
         public readonly label: string,
         public readonly resourceUri: vscode.Uri,
         public readonly collapsibleState: vscode.TreeItemCollapsibleState,
-        public readonly isDirectory: boolean
+        public readonly isDirectory: boolean,
+        public readonly workspaceRoot: string
     ) {
         super(label, collapsibleState);
 

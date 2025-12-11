@@ -4,11 +4,9 @@ import * as path from 'path';
 import { GitTrackedProvider } from './gitTrackedProvider';
 
 export function activate(context: vscode.ExtensionContext) {
-    const rootPath = vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders.length > 0
-        ? vscode.workspace.workspaceFolders[0].uri.fsPath
-        : undefined;
+    const workspaceFolders = vscode.workspace.workspaceFolders || [];
 
-    const gitTrackedProvider = new GitTrackedProvider(rootPath);
+    const gitTrackedProvider = new GitTrackedProvider(workspaceFolders);
 
     vscode.window.registerTreeDataProvider('gitTrackedExplorer', gitTrackedProvider);
 
@@ -24,10 +22,10 @@ export function activate(context: vscode.ExtensionContext) {
         })
     );
 
-    // Watch git index file (supports --separate-git-dir)
-    if (rootPath) {
-        setupGitIndexWatcher(rootPath, gitTrackedProvider, context);
-    }
+    // Watch git index file for each workspace folder (supports --separate-git-dir)
+    workspaceFolders.forEach(folder => {
+        setupGitIndexWatcher(folder.uri.fsPath, gitTrackedProvider, context);
+    });
 }
 
 function setupGitIndexWatcher(

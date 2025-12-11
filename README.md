@@ -1,33 +1,47 @@
 # Git Tracked Explorer
 
-VS Code extension that shows only git-tracked files in the explorer view.
+A VS Code extension that displays only git-tracked files in the Explorer view, making it easy to focus on version-controlled files.
 
 ## Features
 
-- Displays only files tracked by git (using `git ls-files`)
-- Respects force-tracked files (files added with `--force`)
-- Tree view structure matching your repository structure
-- Real-time updates when files change
-- Refresh button to manually update the view
+- **Shows only git-tracked files** - Uses `git ls-files` to display exactly what's tracked
+- **Respects force-tracked files** - Files added with `git add --force` are included
+- **Tree view structure** - Matches your repository's directory structure
+- **Real-time updates** - Automatically refreshes when git tracking changes
+- **Multi-root workspace support** - Works with multiple workspace folders
+- **--separate-git-dir support** - Handles repositories with separate git directories
 
-## Requirements
+## Why This Extension?
 
-- Git must be installed and available in PATH
-- The workspace must be a git repository
+Unlike using `.gitignore` to filter the Explorer view, this extension shows the **actual git-tracked files** based on what's in your git index. This means:
+
+- Files in `.gitignore` but force-tracked with `git add --force` are shown
+- Newly created files (not yet tracked) are hidden until you `git add` them
+- It reflects the true state of your git repository
 
 ## Usage
 
 1. Open a git repository in VS Code
-2. Look for "Git Tracked Files" view in the Explorer sidebar
-3. All git-tracked files will be displayed in a tree structure
-4. Click on any file to open it
-5. Use the refresh button to manually update the view
+2. Find the "Git Tracked Files" view in the Explorer sidebar
+3. Browse your git-tracked files in tree structure
 
-## Development
+## Supported Scenarios
 
-```bash
-npm install
-npm run compile
-```
+- ✅ Standard git repositories
+- ✅ Repositories with `--separate-git-dir`
+- ✅ Multi-root workspaces
+- ✅ Force-tracked files
+- ✅ Dynamic workspace folder changes
+- ✅ Repository initialization (`git init`)
 
-Press F5 in VS Code to run the extension in development mode.
+## License
+
+MIT
+
+## Author
+
+Jun Wooram - [@chatoo2412](https://github.com/chatoo2412)
+
+## Issues & Contributions
+
+Report issues or contribute at [GitHub](https://github.com/chatoo2412/vscode-git-tracked-explorer)

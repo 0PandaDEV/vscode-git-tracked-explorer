@@ -2,7 +2,28 @@
   "name": "git-tracked-explorer",
   "displayName": "Git Tracked Explorer",
   "description": "Show only git-tracked files in VS Code explorer",
-  "version": "0.0.1",
+  "version": "1.0.0",
+  "publisher": "chatoo2412",
+  "author": {
+    "name": "Jun Wooram",
+    "email": "chatoo2412@gmail.com"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/chatoo2412/vscode-git-tracked-explorer.git"
+  },
+  "bugs": {
+    "url": "https://github.com/chatoo2412/vscode-git-tracked-explorer/issues"
+  },
+  "homepage": "https://github.com/chatoo2412/vscode-git-tracked-explorer#readme",
+  "keywords": [
+    "git",
+    "explorer",
+    "tracked",
+    "files",
+    "tree-view"
+  ],
   "engines": {
     "vscode": "^1.75.0"
   },

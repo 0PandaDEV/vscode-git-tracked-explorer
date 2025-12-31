@@ -35,13 +35,15 @@
   ],
   "main": "./out/extension.js",
   "contributes": {
-    "views": {
-      "explorer": [
-        {
-          "id": "gitTrackedExplorer",
-          "name": "Git Tracked Files"
+    "configuration": {
+      "title": "Git Tracked Explorer",
+      "properties": {
+        "gitTracked.enabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable hiding of untracked files in the explorer."
         }
-      ]
+      }
     },
     "commands": [
       {
@@ -52,6 +54,10 @@
       {
         "command": "gitTrackedExplorer.openFile",
         "title": "Open File"
+      },
+      {
+        "command": "gitTracked.toggle",
+        "title": "Toggle Git Tracked Files Only"
       }
     ],
     "menus": {

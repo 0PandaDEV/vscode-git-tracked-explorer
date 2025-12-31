@@ -1,90 +1,59 @@
-import * as vscode from 'vscode';
-import { GitTrackedProvider } from './gitTrackedProvider';
-import { WatcherManager } from './watcherManager';
+import * as vscode from "vscode";
+import { ExclusionManager } from "./exclusionManager";
+import { WatcherManager } from "./watcherManager";
 
-/**
- * Extension activation entry point.
- * Follows: "Beautiful is better than ugly"
- */
 export function activate(context: vscode.ExtensionContext) {
-    const provider = new GitTrackedProvider(vscode.workspace.workspaceFolders || []);
-    const watcherManager = new WatcherManager(provider, context);
+  const exclusionManager = new ExclusionManager();
+  const watcherManager = new WatcherManager(exclusionManager, context);
 
-    registerTreeView(provider, context);
-    registerCommands(provider, context);
-    setupInitialWatchers(watcherManager);
-    watchWorkspaceFolderChanges(provider, watcherManager, context);
+  const syncState = async () => {
+    const config = vscode.workspace.getConfiguration("gitTracked");
+    const isEnabled = config.get<boolean>("enabled", false);
+
+    if (isEnabled) {
+      console.log("[GitHide] Enabled via settings. Applying exclusions...");
+      await exclusionManager.refresh();
+      setupWatchers(watcherManager);
+    } else {
+      console.log("[GitHide] Disabled via settings. Clearing exclusions...");
+      watcherManager.disposeAll();
+      await exclusionManager.clearExclusions();
+    }
+  };
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand("gitTracked.toggle", async () => {
+      const config = vscode.workspace.getConfiguration("gitTracked");
+      const currentState = config.get<boolean>("enabled", false);
+
+      await config.update(
+        "enabled",
+        !currentState,
+        vscode.ConfigurationTarget.Workspace
+      );
+    })
+  );
+
+  context.subscriptions.push(
+    vscode.workspace.onDidChangeConfiguration((e) => {
+      if (e.affectsConfiguration("gitTracked.enabled")) {
+        syncState();
+      }
+    })
+  );
+
+  context.subscriptions.push(
+    vscode.workspace.onDidChangeWorkspaceFolders(() => {
+      syncState();
+    })
+  );
+
+  syncState();
 }
 
-/**
- * Register tree data provider.
- */
-function registerTreeView(provider: GitTrackedProvider, context: vscode.ExtensionContext): void {
-    vscode.window.registerTreeDataProvider('gitTrackedExplorer', provider);
-}
-
-/**
- * Register extension commands.
- * Follows: "Sparse is better than dense"
- */
-function registerCommands(provider: GitTrackedProvider, context: vscode.ExtensionContext): void {
-    context.subscriptions.push(
-        vscode.commands.registerCommand('gitTrackedExplorer.refresh', () => {
-            provider.refresh();
-        })
-    );
-
-    context.subscriptions.push(
-        vscode.commands.registerCommand('gitTrackedExplorer.openFile', (resource: vscode.Uri) => {
-            vscode.window.showTextDocument(resource);
-        })
-    );
-}
-
-/**
- * Setup watchers for initial workspace folders.
- */
-function setupInitialWatchers(watcherManager: WatcherManager): void {
-    const folders = vscode.workspace.workspaceFolders || [];
-    folders.forEach(folder => {
-        watcherManager.setupWatchers(folder.uri.fsPath);
-    });
-}
-
-/**
- * Watch for workspace folder changes (add/remove).
- * Follows: "Flat is better than nested"
- */
-function watchWorkspaceFolderChanges(
-    provider: GitTrackedProvider,
-    watcherManager: WatcherManager,
-    context: vscode.ExtensionContext
-): void {
-    context.subscriptions.push(
-        vscode.workspace.onDidChangeWorkspaceFolders(event => {
-            handleWorkspaceFoldersChanged(event, provider, watcherManager);
-        })
-    );
-}
-
-/**
- * Handle workspace folder add/remove events.
- * Follows: "Readability counts"
- */
-function handleWorkspaceFoldersChanged(
-    event: vscode.WorkspaceFoldersChangeEvent,
-    provider: GitTrackedProvider,
-    watcherManager: WatcherManager
-): void {
-    provider.updateWorkspaceFolders(vscode.workspace.workspaceFolders || []);
-
-    event.added.forEach(folder => {
-        watcherManager.setupWatchers(folder.uri.fsPath);
-    });
-
-    event.removed.forEach(folder => {
-        watcherManager.removeWatchers(folder.uri.fsPath);
-    });
+function setupWatchers(watcherManager: WatcherManager) {
+  const folders = vscode.workspace.workspaceFolders || [];
+  folders.forEach((folder) => watcherManager.setupWatchers(folder.uri.fsPath));
 }
 
 export function deactivate() {}

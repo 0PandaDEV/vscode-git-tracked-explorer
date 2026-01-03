@@ -15,9 +15,15 @@ export function activate(context: vscode.ExtensionContext) {
       await exclusionManager.refresh();
       setupWatchers(watcherManager);
     } else {
-      console.log("[GitHide] Disabled via settings. Clearing exclusions...");
+      console.log("[GitHide] Disabled via settings. Not applying exclusions.");
       watcherManager.disposeAll();
-      await exclusionManager.clearExclusions();
+
+      // Only clear if there's actually a workspace value to clear
+      const configAny = vscode.workspace.getConfiguration();
+      const inspected = configAny.inspect("files.exclude");
+      if (inspected?.workspaceValue !== undefined) {
+        await exclusionManager.clearExclusions();
+      }
     }
   };
 

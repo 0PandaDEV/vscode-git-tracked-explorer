@@ -56,13 +56,61 @@ export class ExclusionManager {
     await this.updateConfig(undefined);
   }
 
-  private async updateConfig(value: any) {
+  private async updateConfig(next: Record<string, boolean> | undefined) {
     const config = vscode.workspace.getConfiguration();
+
+    const inspected = config.inspect<Record<string, boolean>>("files.exclude");
+    const current = inspected?.workspaceValue; // what's actually in the workspace file
+
+    const normalize = (obj?: Record<string, boolean>) => {
+      if (!obj) return "";
+      const keys = Object.keys(obj).sort();
+      return JSON.stringify(
+        keys.reduce(
+          (acc, k) => ((acc[k] = obj[k]), acc),
+          {} as Record<string, boolean>
+        )
+      );
+    };
+
+    if (normalize(current) === normalize(next)) return; // no-op => no settings.json write
+
     await config.update(
       "files.exclude",
-      value,
+      next,
       vscode.ConfigurationTarget.Workspace
     );
+
+    // optional cleanup if we just removed the last setting
+    await this.deleteEmptyWorkspaceSettingsJsonIfSafe();
+  }
+
+  private async deleteEmptyWorkspaceSettingsJsonIfSafe(): Promise<void> {
+    // If it's a multi-root workspace, settings live in the .code-workspace file. [web:2]
+    if (vscode.workspace.workspaceFile) return;
+
+    const folders = vscode.workspace.workspaceFolders ?? [];
+    for (const folder of folders) {
+      const settingsPath = path.join(
+        folder.uri.fsPath,
+        ".vscode",
+        "settings.json"
+      );
+      if (!fs.existsSync(settingsPath)) continue;
+
+      const raw = fs.readFileSync(settingsPath, "utf8").trim();
+
+      // Very conservative: only delete if it's exactly an empty object
+      if (raw === "{}") {
+        fs.unlinkSync(settingsPath);
+
+        const vscodeDir = path.dirname(settingsPath);
+        const remaining = fs.existsSync(vscodeDir)
+          ? fs.readdirSync(vscodeDir)
+          : [];
+        if (remaining.length === 0) fs.rmdirSync(vscodeDir);
+      }
+    }
   }
 
   private isTrackedOrParent(
